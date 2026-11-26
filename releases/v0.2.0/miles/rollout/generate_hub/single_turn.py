@@ -1,0 +1,60 @@
+"""
+Simple single-turn generation.
+"""
+
+from miles.rollout.base_types import GenerateFnInput, GenerateFnOutput
+from miles.rollout.generate_utils.generate_endpoint_utils import (
+    compute_prompt_ids_from_sample,
+    compute_request_payload,
+    compute_routing_headers,
+    update_sample_from_response,
+)
+from miles.utils.http_utils import post
+from miles.utils.media_refs import has_media
+from miles.utils.types import Sample
+
+
+async def generate(input: GenerateFnInput, url: str | None = None) -> GenerateFnOutput:
+    args = input.args
+    sample = input.sample
+    sampling_params = input.sampling_params
+    assert sample.status in {Sample.Status.PENDING, Sample.Status.ABORTED}, f"{sample.status=}"
+    url = url or f"http://{args.sglang_router_ip}:{args.sglang_router_port}/generate"
+
+    prompt_ids = compute_prompt_ids_from_sample(input.state, sample)
+
+    # Handle Partial Rollout resuming
+    if len(sample.response) > 0:
+        input_ids = sample.tokens
+        # In token space sample.tokens holds the prompt SGLang expanded, which is longer than prompt_ids.
+        token_space = args.multimodal_token_space_processing and has_media(sample.multimodal_inputs)
+        sampling_params["max_new_tokens"] -= (
+            sample.response_length if token_space else len(sample.tokens) - len(prompt_ids)
+        )
+
+        assert sampling_params["max_new_tokens"] >= 0
+        if sampling_params["max_new_tokens"] == 0:
+            sample.status = Sample.Status.TRUNCATED
+            return GenerateFnOutput(samples=sample)
+    else:
+        input_ids = prompt_ids
+
+    # A partial-rollout resume resends the tokens SGLang already expanded, so nothing is expanded again.
+    mm_token_expansion_start_len = len(input_ids) if len(sample.response) > 0 else 0
+    payload, halt_status = compute_request_payload(
+        args,
+        input_ids=input_ids,
+        sampling_params=sampling_params,
+        multimodal_inputs=sample.multimodal_inputs,
+        evaluation=input.evaluation,
+        kv_cache_namespace=sample.kv_cache_namespace,
+        mm_token_expansion_start_len=mm_token_expansion_start_len,
+    )
+    if payload is None:
+        sample.status = halt_status
+        return GenerateFnOutput(samples=sample)
+
+    output = await post(url, payload, headers=compute_routing_headers(args, sample))
+    await update_sample_from_response(args, sample, payload=payload, output=output, tokenizer=input.state.tokenizer)
+
+    return GenerateFnOutput(samples=sample)
