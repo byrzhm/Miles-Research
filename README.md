@@ -53,6 +53,11 @@ PR 数与贡献者数取自各版本 Release Notes；v0.1.0 是首个版本，�
 
 完整 commit 见各版本目录下的 `release-lock.json`。v0.2.0 还锁定子模块 miles-ext-kernels 于 `34da9a8da9`（可选，默认不启用）。
 
+## 文档
+
+- [docs/](docs/)：归档源码的专题解析。
+  - [Miles Rollout 源码解析](docs/miles-rollout.md)：以 v0.2.0 为基线，解释 Rollout 的控制面 / 数据面、生成链路、TITO 会话、完全异步缓冲、正确性与 checkpoint 机制，并给出 v0.1.0 → v0.2.0 的逐版本演进。
+
 ## 版本演进
 
 ### v0.1.0 — 首个正式版本：生产级全栈 RL 基座
